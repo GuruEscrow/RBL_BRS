@@ -6,27 +6,36 @@ const readLines = require('n-readlines');
 const { json } = require('stream/consumers');
 
 // Global variables
-const BASE_URL = "https://myglivetest.escrowstack.io";
+const BASE_URL = "https://cas.myground11.co.in";
 let currentDate = "";
 let outputDirectoryPath = process.cwd();
-const warningStr = 'Usage: node index.js <DATE (YYYY-MM-DD)>';
+const warningStr = 'Usage: node index.js <DATE (YYYY-MM-DD)> <collect/payout>';
 
 // Directories / file names
 const eodDir = "EOD";
-const bankStmtFileName = "bank_statements.json";
+let bankStmtFileName;
 const serviceKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJlODdjZTAzMS0yZDZmLTQ0ZjAtYmY0Zi00ODg2Yjc2ZmIzMzIiLCJuYW1lIjpbImdldF9heGlzX2JhbmtfYWNjb3VudF9zdGF0ZW1lbnQiLCJnZXRfcGF5b3V0X2xvZ19lbnRyaWVzX2RhdGVfcmFuZ2UiLCJnZXRfdmFuX2NvbGxlY3RzX2VudHJpZXNfZGF0ZV9yYW5nZSIsImNoZWNrX2FuZF9wcm9jZXNzX3N0YXR1c193aXRoX2F4aXNfYmFuayIsImdldF9wYXlvdXRfbG9nX2VudHJpZXMiLCJjaGVja19zdGF0dXNfd2l0aF9heGlzX2JhbmsiLCJyZXZlcnRfcGF5b3V0c193aXRoX3V0ciJdLCJhdXRob3JpemVkX3BlcnNvbiI6eyJuYW1lIjoiQW51c3JlZSBWaW5vZCJ9LCJ0eXBlIjoic2VydmljZSIsImVudiI6ImxpdmUiLCJpYXQiOjE3MjY1NDgwMDd9.A6GWK1uflE2Qxx28vip5QsahM4nCsXLaueA_wL2Hc8s";
 
 let serialCounter = 0;
 let bnkStmtWriterInterface;
 let numberOfStmtFetchCount = 1;
 const stmtArray = [];
+let stmtType;
 
 // Process args
-if (process.argv.length < 3 || process.argv.length > 4) {
+if (process.argv.length < 4 || process.argv.length > 4) {
     console.log(warningStr);
     process.exit(1);
 } else {
     currentDate = process.argv[2];
+
+    if(process.argv[3] === 'collect'||process.argv[3] === 'payout'){
+        stmtType = process.argv[3];
+        stmtType === 'collect'?bankStmtFileName = "collect_bank_statements.json":bankStmtFileName = "bank_statements.json";
+    }else{
+        console.log(warningStr);
+        process.exit(1);
+    }
     outputDirectoryPath += `/${eodDir}/${currentDate.split("-").join("/")}/in/`;
 
     let date_check_moment = moment(currentDate, 'YYYY-MM-DD', true);
@@ -35,7 +44,7 @@ if (process.argv.length < 3 || process.argv.length > 4) {
         process.exit(-1);
     }
 
-    if (process.argv.length > 3 && isStringPositiveInteger(process.argv[3])) {
+    if (process.argv.length > 4 && isStringPositiveInteger(process.argv[4])) {
         scan_increment_in_min = parseInt(process.argv[3], 10);
     }
 }
@@ -55,6 +64,7 @@ const setupOutputFile = () => {
 const getStmtApiCall = async (url, data) => {
     const options = { headers: { 'Content-Type': 'application/json', 'apikey': serviceKey } };
     try {
+        console.log(data);
         const response = await axios.post(url, data, options);
         if (response.status === 200) {
             return Promise.resolve({ success: true, data: response.data });
@@ -67,15 +77,22 @@ const getStmtApiCall = async (url, data) => {
     }
 };
 
-const getStatements = async (fromDate, toDate, tran_type, amtValue, curCode, LpstDate, LTxnDate, LtxnID, LsrlNo) => {
-    const url = `${BASE_URL}/v1/service/get_live_account_statement_by_date`;
+const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxnDate, LtxnID, LsrlNo) => {
+    const url = `${BASE_URL}/v1/service/get_rbl_bank_account_statement`;
+    let ledger;
+    if(stmtType === 'collect'){
+        ledger = "MYground11Collect409002366181";
+    }
+    if(stmtType === 'payout'){
+        ledger = "MYGROUND11409002362954";
+    }
 
     const requestPayload = {
-        ledger_label: "MYGROUND11409002362954",
-        mode: tran_type,
+        ledger_label: ledger,
         from_date: fromDate,
         to_date: toDate,
-        Pagination_Details: {
+        format: "json",
+        pagination_details: {
             Last_Balance: {
                 Amount_Value: amtValue,
                 Currency_Code: curCode
@@ -182,13 +199,21 @@ const getStatements = async (fromDate, toDate, tran_type, amtValue, curCode, Lps
                 transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[1].trim();
                 transaction.paymentMode = "UPI";
                 transaction.channel = "UPI";
-                transaction.virtualAccountNumber = txnDesc ? txnDesc.split("/")[3].trim():"";
+                if(txnDesc.split("/").length<4){
+                    transaction.virtualAccountNumber = "";
+                }else{
+                    transaction.virtualAccountNumber = txnDesc ? txnDesc.split("/")[3].trim():"";
+                }
             }
             else if (txnDesc.startsWith("R/UPI/")) {
                 transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[2].trim();
                 transaction.paymentMode = "UPI";
                 transaction.channel = "UPI";
-                transaction.virtualAccountNumber = txnDesc ? txnDesc.split("/")[4].trim():"";
+                if(txnDesc.split("/").length<5){
+                    transaction.virtualAccountNumber = "";
+                }else{
+                    transaction.virtualAccountNumber = txnDesc ? txnDesc.split("/")[4].trim():"";
+                }
             }
             else if (txnDesc.includes("-")) {
                 if (txnDesc.startsWith("R-")) {
@@ -206,9 +231,15 @@ const getStatements = async (fromDate, toDate, tran_type, amtValue, curCode, Lps
             }
             // RTGS transaction
             else if (txnDesc.startsWith("RTGS/")) {
-                transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[1].trim();  // Extract number after "NEFT/"
+                transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[1].trim();  // Extract number after "RTGS/"
                 transaction.paymentMode = "RTGS";
                 transaction.channel = "RTGS";
+            }
+            // Internal Collect
+            else if (txnDesc.startsWith("IB")) {
+                transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[0].trim();  // Extract first array"
+                transaction.paymentMode = "OFT";
+                transaction.channel = "OFT";
             }
             // IFT or other transactions fall back to txnId
             else {
@@ -230,12 +261,13 @@ const getStatements = async (fromDate, toDate, tran_type, amtValue, curCode, Lps
 
         // Recursive call for pagination
         numberOfStmtFetchCount++;
-        await getStatements(fromDate, toDate, "B", runBlc, currencyCode, pstdDate, txnDate, txnID, txnSrlNo);
+        await getStatements(fromDate, toDate, runBlc, currencyCode, pstdDate, txnDate, txnID, txnSrlNo);
     } else {
         if (responseData.error_msg === "No record could be retrieved") {
             console.log("Statement Fetch is done");
         } else {
-            console.error("ERROR: Check Once");
+            console.log("Request body -->", requestPayload)
+            console.error("ERROR: Check Once", responseData);
         }
     }
 };
@@ -250,7 +282,6 @@ const startProcess = async () => {
     await getStatements(
         prevDate, // fromDate
         nextDate, // toDate
-        "B",      // tran_type
         "",       // amtValue
         "",       // curCode
         "",       // LpstDate
