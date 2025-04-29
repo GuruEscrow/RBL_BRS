@@ -8,6 +8,7 @@ const { json } = require('stream/consumers');
 // Global variables
 const BASE_URL = "https://cas.myground11.co.in";
 let currentDate = "";
+let nextDate;
 let outputDirectoryPath = process.cwd();
 const warningStr = 'Usage: node index.js <DATE (YYYY-MM-DD)> <collect/payout>';
 
@@ -16,7 +17,7 @@ const eodDir = "EOD";
 let bankStmtFileName;
 const serviceKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJlODdjZTAzMS0yZDZmLTQ0ZjAtYmY0Zi00ODg2Yjc2ZmIzMzIiLCJuYW1lIjpbImdldF9heGlzX2JhbmtfYWNjb3VudF9zdGF0ZW1lbnQiLCJnZXRfcGF5b3V0X2xvZ19lbnRyaWVzX2RhdGVfcmFuZ2UiLCJnZXRfdmFuX2NvbGxlY3RzX2VudHJpZXNfZGF0ZV9yYW5nZSIsImNoZWNrX2FuZF9wcm9jZXNzX3N0YXR1c193aXRoX2F4aXNfYmFuayIsImdldF9wYXlvdXRfbG9nX2VudHJpZXMiLCJjaGVja19zdGF0dXNfd2l0aF9heGlzX2JhbmsiLCJyZXZlcnRfcGF5b3V0c193aXRoX3V0ciJdLCJhdXRob3JpemVkX3BlcnNvbiI6eyJuYW1lIjoiQW51c3JlZSBWaW5vZCJ9LCJ0eXBlIjoic2VydmljZSIsImVudiI6ImxpdmUiLCJpYXQiOjE3MjY1NDgwMDd9.A6GWK1uflE2Qxx28vip5QsahM4nCsXLaueA_wL2Hc8s";
 
-let serialCounter = 0;
+let serialCounter = 1;
 let bnkStmtWriterInterface;
 let numberOfStmtFetchCount = 1;
 const stmtArray = [];
@@ -152,9 +153,6 @@ const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxn
             const formatedValueDate = moment(valueDate,"YYYY-MM-DDTHH:mm:ss.SSS").format("DD/MM/YYYY");
             const timeStamp = moment(pstdDate,"YYYY-MM-DDTHH:mm:ss.SSS").format("HH:mm:ss");
 
-            // Increment serial number for each transaction
-            serialCounter++;
-
             const transaction = {
                 serialNumber: serialCounter,
                 transactionDate: FormatedTxnDate,
@@ -255,7 +253,15 @@ const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxn
             let stmtFetchDate = moment(currentDate, 'YYYY-MM-DD').format('YYYY-MM-DD');
 
             if(stmtTxnDate === stmtFetchDate){
+                // Increment serial number for each transaction
+                serialCounter++;
+                
                 stmtArray.push(transaction);
+            }
+
+            //If postDate is next days date the I will return without fetch for further
+            if(stmtTxnDate === nextDate){
+                return;
             }
         }
 
@@ -276,12 +282,12 @@ const startProcess = async () => {
     setupOutputFile();
 
     let prevDate = moment(currentDate, 'YYYY-MM-DD').subtract(1,'days').format('YYYY-MM-DD');
-    // let fromDate = moment(currentDate, 'YYYY-MM-DD').format('YYYY-MM-DD');
-    let nextDate = moment(currentDate, 'YYYY-MM-DD').add(1,'days').format('YYYY-MM-DD');
+    let currentBrsDate = moment(currentDate, 'YYYY-MM-DD').format('YYYY-MM-DD');
+    nextDate = moment(currentDate, 'YYYY-MM-DD').add(1,'days').format('YYYY-MM-DD');
 
     await getStatements(
         prevDate, // fromDate
-        nextDate, // toDate
+        currentBrsDate, // toDate
         "",       // amtValue
         "",       // curCode
         "",       // LpstDate
