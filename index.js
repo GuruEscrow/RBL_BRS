@@ -19,8 +19,9 @@ const serviceKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJlODdjZTAzMS0
 
 let serialCounter = 1;
 let bnkStmtWriterInterface;
+let bnkStmtReaderInterface;
 let numberOfStmtFetchCount = 1;
-const stmtArray = [];
+const stmtMap = {};
 let stmtType;
 
 // Process args
@@ -30,10 +31,10 @@ if (process.argv.length < 4 || process.argv.length > 4) {
 } else {
     currentDate = process.argv[2];
 
-    if(process.argv[3] === 'collect'||process.argv[3] === 'payout'){
+    if (process.argv[3] === 'collect' || process.argv[3] === 'payout') {
         stmtType = process.argv[3];
-        stmtType === 'collect'?bankStmtFileName = "collect_bank_statements.json":bankStmtFileName = "bank_statements.json";
-    }else{
+        stmtType === 'collect' ? bankStmtFileName = "collect_bank_statements.json" : bankStmtFileName = "bank_statements.json";
+    } else {
         console.log(warningStr);
         process.exit(1);
     }
@@ -50,6 +51,29 @@ if (process.argv.length < 4 || process.argv.length > 4) {
     }
 }
 
+const filePath = path.join(__dirname, 'paginationData.json');
+
+// Function to read all key-value pairs
+function readAllKeyValues() {
+  if (!fs.existsSync(filePath)) return {};
+  const rawData = fs.readFileSync(filePath, 'utf8');
+  return rawData.trim() ? JSON.parse(rawData) : {};
+}
+
+// Function to update or add a key-value pair
+function updateKeyValue(key, value) {
+  const data = readAllKeyValues();
+  data[key] = value;
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+// Function to fetch value by key
+function getValueByKey(key) {
+  const data = readAllKeyValues();
+  return data[key];
+}
+
+
 // Function to ensure directory exists and create/truncate file
 const setupOutputFile = () => {
     const dirPath = path.dirname(outputDirectoryPath + bankStmtFileName);
@@ -57,8 +81,45 @@ const setupOutputFile = () => {
         fs.mkdirSync(dirPath, { recursive: true });
     }
 
-    fs.writeFileSync(outputDirectoryPath + bankStmtFileName, '');
+    // fs.writeFileSync(outputDirectoryPath + bankStmtFileName, '');
     bnkStmtWriterInterface = fs.createWriteStream(outputDirectoryPath + bankStmtFileName, { flags: 'a' });
+};
+
+const createPreStatementMap = async () => {
+    // processing function.
+    const processStmtLine = (line) => {
+        if (!line) return;
+        const parsedStmt = JSON.parse(line);
+        const utr = parsedStmt.utrNumber;
+        const bal = parsedStmt.balance;
+        const uqStr = parsedStmt.pstdDate;
+        const key = `${utr}_${bal}_${uqStr}`;
+        if (!key) return;
+        if (key in stmtMap) {
+            console.log("duplicate found: ", key);
+        } else {
+            stmtMap[key] = true;
+            console.log("updated Stmt map: ", key);
+        }
+    };
+
+    try {
+        if (fs.existsSync(outputDirectoryPath + bankStmtFileName) && fs.statSync(outputDirectoryPath + bankStmtFileName).size !== 0) {
+            bnkStmtReaderInterface = new readLines(outputDirectoryPath + bankStmtFileName);
+        } else {
+            fs.mkdirSync(outputDirectoryPath, { recursive: true });
+        }
+    } catch (e) {
+        console.log('Error:', e.stack);
+        return false;
+    }
+
+    if (bnkStmtReaderInterface) {
+        let line;
+        while ((line = bnkStmtReaderInterface.next())) {
+            processStmtLine(line);
+        }
+    }
 };
 
 // Statement API Call
@@ -79,12 +140,19 @@ const getStmtApiCall = async (url, data) => {
 };
 
 const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxnDate, LtxnID, LsrlNo) => {
+    updateKeyValue("Amount_Value",amtValue);
+    updateKeyValue("Currency_Code",curCode);
+    updateKeyValue("Last_Pstd_Date", LpstDate);
+    updateKeyValue("Last_Txn_Date",LTxnDate);
+    updateKeyValue("Last_Txn_Id",LtxnID);
+    updateKeyValue("Last_Txn_SrlNo",LsrlNo);
+
     const url = `${BASE_URL}/v1/service/get_rbl_bank_account_statement`;
     let ledger;
-    if(stmtType === 'collect'){
+    if (stmtType === 'collect') {
         ledger = "MYground11Collect409002366181";
     }
-    if(stmtType === 'payout'){
+    if (stmtType === 'payout') {
         ledger = "MYGROUND11409002362954";
     }
 
@@ -128,30 +196,30 @@ const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxn
             txnsAmt = jsonStmts.transactionSummary.txnAmt.amountValue ? parseFloat(jsonStmts.transactionSummary.txnAmt.amountValue) : 0;
             txnDate = jsonStmts.transactionSummary.txnDate ? jsonStmts.transactionSummary.txnDate.trim() : "";
             txnDesc = jsonStmts.transactionSummary.txnDesc ? jsonStmts.transactionSummary.txnDesc.trim() : "";
-            if(jsonStmts.transactionSummary.txnType === "D"){
+            if (jsonStmts.transactionSummary.txnType === "D") {
                 txnType = "DR";
-            }else if(jsonStmts.transactionSummary.txnType === "C"){
+            } else if (jsonStmts.transactionSummary.txnType === "C") {
                 txnType = "CR";
-            }else{
+            } else {
                 txnType = "";
             }
-            
+
             //TxnBalance body
             runBlc = jsonStmts.txnBalance.amountValue ? parseFloat(jsonStmts.txnBalance.amountValue.trim()) : 0;
             currencyCode = jsonStmts.txnBalance.currencyCode ? jsonStmts.txnBalance.currencyCode.trim() : "";
 
             //OuterBody
             allTxnID = jsonStmts.txnId.trim();
-            txnID = jsonStmts.txnId ?jsonStmts.txnId.trim():"";
+            txnID = jsonStmts.txnId ? jsonStmts.txnId.trim() : "";
             txnSrlNo = jsonStmts.txnSrlNo.trim();
             valueDate = jsonStmts.valueDate ? jsonStmts.valueDate.trim() : "";
 
 
             //Formating the time statmps
-            const FormatedTxnDate = moment(txnDate,"YYYY-MM-DDTHH:mm:ss.SSS").format("DD/MM/YYYY");
-            const FormatedPstdDate = moment(pstdDate,"YYYY-MM-DDTHH:mm:ss.SSS").format("DD/MM/YYYY HH:mm:ss");
-            const formatedValueDate = moment(valueDate,"YYYY-MM-DDTHH:mm:ss.SSS").format("DD/MM/YYYY");
-            const timeStamp = moment(pstdDate,"YYYY-MM-DDTHH:mm:ss.SSS").format("HH:mm:ss");
+            const FormatedTxnDate = moment(txnDate, "YYYY-MM-DDTHH:mm:ss.SSS").format("DD/MM/YYYY");
+            const FormatedPstdDate = moment(pstdDate, "YYYY-MM-DDTHH:mm:ss.SSS").format("DD/MM/YYYY HH:mm:ss");
+            const formatedValueDate = moment(valueDate, "YYYY-MM-DDTHH:mm:ss.SSS").format("DD/MM/YYYY");
+            const timeStamp = moment(pstdDate, "YYYY-MM-DDTHH:mm:ss.SSS").format("HH:mm:ss");
 
             const transaction = {
                 serialNumber: serialCounter,
@@ -176,7 +244,7 @@ const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxn
                 benficiaryAccountNumber: "",
                 benficiaryIFSC: "",
                 channel: "", //added
-                timeStamp: timeStamp, 
+                timeStamp: timeStamp,
                 remarks: "",
                 transactionCurrencyCode: currencyCode,
                 internalReferenceId: "",
@@ -194,54 +262,54 @@ const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxn
             // UPI transaction handling
             // Extract UTR number based on transaction type
             if (txnDesc.startsWith("UPI/")) {
-                transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[1].trim();
+                transaction.utrNumber = txnDesc === "" ? "" : txnDesc.split("/")[1].trim();
                 transaction.paymentMode = "UPI";
                 transaction.channel = "UPI";
-                if(txnDesc.split("/").length<4){
+                if (txnDesc.split("/").length < 4) {
                     transaction.virtualAccountNumber = "";
-                }else{
-                    transaction.virtualAccountNumber = txnDesc ? txnDesc.split("/")[3].trim():"";
+                } else {
+                    transaction.virtualAccountNumber = txnDesc ? txnDesc.split("/")[3].trim() : "";
                 }
             }
             else if (txnDesc.startsWith("R/UPI/")) {
-                transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[2].trim();
+                transaction.utrNumber = txnDesc === "" ? "" : txnDesc.split("/")[2].trim();
                 transaction.paymentMode = "UPI";
                 transaction.channel = "UPI";
-                if(txnDesc.split("/").length<5){
+                if (txnDesc.split("/").length < 5) {
                     transaction.virtualAccountNumber = "";
-                }else{
-                    transaction.virtualAccountNumber = txnDesc ? txnDesc.split("/")[4].trim():"";
+                } else {
+                    transaction.virtualAccountNumber = txnDesc ? txnDesc.split("/")[4].trim() : "";
                 }
             }
             else if (txnDesc.includes("-")) {
                 if (txnDesc.startsWith("R-")) {
-                    transaction.utrNumber = txnDesc === ""?"":txnDesc.split("-")[1].trim();
+                    transaction.utrNumber = txnDesc === "" ? "" : txnDesc.split("-")[1].trim();
                 } else {
-                    transaction.utrNumber = txnDesc === ""?"":txnDesc.split("-")[0].trim();
+                    transaction.utrNumber = txnDesc === "" ? "" : txnDesc.split("-")[0].trim();
                 }
                 transaction.paymentMode = "IMPS";
                 transaction.channel = "IMPS";
             }
             else if (txnDesc.startsWith("NEFT/")) {
-                transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[1].trim();
+                transaction.utrNumber = txnDesc === "" ? "" : txnDesc.split("/")[1].trim();
                 transaction.paymentMode = "NEFT";
                 transaction.channel = "NEFT";
             }
             // RTGS transaction
             else if (txnDesc.startsWith("RTGS/")) {
-                transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[1].trim();  // Extract number after "RTGS/"
+                transaction.utrNumber = txnDesc === "" ? "" : txnDesc.split("/")[1].trim();  // Extract number after "RTGS/"
                 transaction.paymentMode = "RTGS";
                 transaction.channel = "RTGS";
             }
             // Internal Collect
             else if (txnDesc.startsWith("IB")) {
-                transaction.utrNumber = txnDesc === ""?"":txnDesc.split("/")[0].trim();  // Extract first array"
+                transaction.utrNumber = txnDesc === "" ? "" : txnDesc.split("/")[0].trim();  // Extract first array"
                 transaction.paymentMode = "OFT";
                 transaction.channel = "OFT";
             }
             // IFT or other transactions fall back to txnId
             else {
-                transaction.utrNumber = txnDesc === ""?"":txnDesc.trim();
+                transaction.utrNumber = txnDesc === "" ? "" : txnDesc.trim();
                 transaction.paymentMode = "IFT";
                 transaction.channel = "IFT";
             }
@@ -249,18 +317,25 @@ const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxn
             /**
              * Validating the postDate with statment fetch Date if both are matching pushing to stmtArray
              */
-            const stmtTxnDate = moment(pstdDate,"YYYY-MM-DDTHH:mm:ss.SSS").format("YYYY-MM-DD");
+            const stmtTxnDate = moment(pstdDate, "YYYY-MM-DDTHH:mm:ss.SSS").format("YYYY-MM-DD");
             let stmtFetchDate = moment(currentDate, 'YYYY-MM-DD').format('YYYY-MM-DD');
 
-            if(stmtTxnDate === stmtFetchDate){
+            const key = `${transaction.utrNumber}_${runBlc}_${FormatedPstdDate}`;
+            if (stmtTxnDate === stmtFetchDate) {
                 // Increment serial number for each transaction
                 serialCounter++;
-                
-                stmtArray.push(transaction);
+
+                if (!key) return;
+                if (key in stmtMap) {
+                    console.log("duplicate found: ", key);
+                } else {
+                    stmtMap[key] = true;
+                    fs.appendFileSync(outputDirectoryPath + bankStmtFileName, `${transaction}\n`, 'utf8');
+                }
             }
 
             //If postDate is next days date the I will return without fetch for further
-            if(stmtTxnDate === nextDate){
+            if (stmtTxnDate === nextDate) {
                 return;
             }
         }
@@ -281,25 +356,24 @@ const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxn
 const startProcess = async () => {
     setupOutputFile();
 
-    let prevDate = moment(currentDate, 'YYYY-MM-DD').subtract(1,'days').format('YYYY-MM-DD');
+    await createPreStatementMap();
+
+    const paginationData = readAllKeyValues();
+    let prevDate = moment(currentDate, 'YYYY-MM-DD').subtract(1, 'days').format('YYYY-MM-DD');
     let currentBrsDate = moment(currentDate, 'YYYY-MM-DD').format('YYYY-MM-DD');
-    nextDate = moment(currentDate, 'YYYY-MM-DD').add(1,'days').format('YYYY-MM-DD');
+    nextDate = moment(currentDate, 'YYYY-MM-DD').add(1, 'days').format('YYYY-MM-DD');
 
     await getStatements(
         prevDate, // fromDate
         currentBrsDate, // toDate
-        "",       // amtValue
-        "",       // curCode
-        "",       // LpstDate
-        "",       // LTxnDate
-        "",       // LtxnID
-        ""        // LsrlNo
+        paginationData.Amount_Value,       // amtValue
+        paginationData.Currency_Code,       // curCode
+        paginationData.Last_Pstd_Date,       // LpstDate
+        paginationData.Last_Txn_Date,       // LTxnDate
+        paginationData.Last_Txn_Id,       // LtxnID
+        paginationData.Last_Txn_SrlNo        // LsrlNo
     );
 
-    for (let i = 0; i < stmtArray.length; i++) {
-        bnkStmtWriterInterface.write(`${JSON.stringify(stmtArray[i])}\n`);
-    }
-    bnkStmtWriterInterface.end();
 };
 
 startProcess();
