@@ -330,7 +330,7 @@ const getStatements = async (fromDate, toDate, amtValue, curCode, LpstDate, LTxn
                     console.log("duplicate found: ", key);
                 } else {
                     stmtMap[key] = true;
-                    fs.appendFileSync(outputDirectoryPath + bankStmtFileName, `${transaction}\n`, 'utf8');
+                    fs.appendFileSync(outputDirectoryPath + bankStmtFileName, `${JSON.stringify(transaction)}\n`, 'utf8');
                 }
             }
 
@@ -366,12 +366,12 @@ const startProcess = async () => {
     await getStatements(
         prevDate, // fromDate
         currentBrsDate, // toDate
-        paginationData.Amount_Value,       // amtValue
-        paginationData.Currency_Code,       // curCode
-        paginationData.Last_Pstd_Date,       // LpstDate
-        paginationData.Last_Txn_Date,       // LTxnDate
-        paginationData.Last_Txn_Id,       // LtxnID
-        paginationData.Last_Txn_SrlNo        // LsrlNo
+        paginationData.Amount_Value?paginationData.Amount_Value:"",       // amtValue
+        paginationData.Currency_Code?paginationData.Currency_Code:"",       // curCode
+        paginationData.Last_Pstd_Date?paginationData.Last_Pstd_Date:"",       // LpstDate
+        paginationData.Last_Txn_Date?paginationData.Last_Txn_Date:"",       // LTxnDate
+        paginationData.Last_Txn_Id?paginationData.Last_Txn_Id:"",       // LtxnID
+        paginationData.Last_Txn_SrlNo?paginationData.Last_Txn_SrlNo:""        // LsrlNo
     );
 
 };
